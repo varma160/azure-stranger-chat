@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Global Stranger Chat - 1 on 1</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+    .custom-scroll::-webkit-scrollbar { width: 5px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 h-screen overflow-hidden flex font-sans">
+
+  <!-- LEFT: Online Strangers Directory -->
+  <aside class="w-80 border-r border-gray-800 bg-gray-900 flex flex-col">
+    <!-- Self Profile Card -->
+    <div class="p-3 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <img id="myAvatar" src="" class="w-10 h-10 rounded-full border border-teal-500 object-cover" />
+        <div>
+          <h2 id="myName" class="text-xs font-bold text-white">Connecting...</h2>
+          <span class="text-[10px] text-green-400">● Online (You)</span>
+        </div>
+      </div>
+      <button onclick="openSettingsModal()" class="text-gray-400 hover:text-white p-2 rounded-lg bg-gray-800">
+        <i class="fa-solid fa-gear text-sm"></i>
+      </button>
+    </div>
+
+    <!-- Strangers Header -->
+    <div class="px-4 py-2 bg-gray-950/60 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+      Strangers Online Worldwide
+    </div>
+
+    <!-- Active Stranger List -->
+    <div id="strangersContainer" class="flex-1 overflow-y-auto custom-scroll divide-y divide-gray-800/50">
+      <div class="p-4 text-center text-xs text-gray-500">Looking for strangers around the world...</div>
+    </div>
+  </aside>
+
+  <!-- RIGHT: 1-to-1 Private Chat Area -->
+  <main class="flex-1 flex flex-col bg-gray-950 relative">
+    
+    <!-- Partner Header -->
+    <div id="chatTopBar" class="p-3 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <img id="partnerAvatar" src="https://api.dicebear.com/7.x/bottts/svg?seed=neutral" class="w-10 h-10 rounded-full border border-gray-700 object-cover" />
+        <div>
+          <h3 id="partnerName" class="text-sm font-bold text-white">Select a Stranger</h3>
+          <p id="partnerStatus" class="text-xs text-gray-500">No active private session</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-3">
+        <span id="typingNotice" class="text-xs text-teal-400 italic hidden">typing...</span>
+        <button id="endChatBtn" onclick="terminateCurrentChat()" class="hidden px-3 py-1 bg-red-600/80 hover:bg-red-600 text-white rounded-lg text-xs font-semibold">
+          End Chat
+        </button>
+      </div>
+    </div>
+
+    <!-- Chat Messages Window -->
+    <div id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-3 custom-scroll bg-gray-900/30">
+      <div id="placeholderScreen" class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+        <i class="fa-solid fa-earth-americas text-5xl text-gray-700"></i>
+        <p class="text-sm">Click on any stranger on the left panel to send a connection request!</p>
+      </div>
+    </div>
+
+    <!-- Bottom Input Dock -->
+    <div id="messageInputBar" class="hidden p-3 bg-gray-900 border-t border-gray-800 flex items-center space-x-2">
+      <button onclick="toggleStickerWindow()" class="text-gray-400 hover:text-yellow-400 text-xl px-2">
+        <i class="fa-regular fa-face-laugh"></i>
+      </button>
+
+      <input 
+        type="text" 
+        id="chatTextInput" 
+        placeholder="Type private message..." 
+        onkeydown="if(event.key==='Enter') sendText()" 
+        oninput="notifyTyping()"
+        class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-sm text-gray-100 focus:outline-none focus:border-teal-500"
+      />
+
+      <button onclick="sendText()" class="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
+        Send
+      </button>
+    </div>
+
+    <!-- 50+ Meme Stickers Grid -->
+    <div id="stickerBox" class="hidden absolute bottom-16 left-4 bg-gray-800 border border-gray-700 rounded-xl p-3 shadow-2xl z-40 w-80 max-h-72 flex flex-col">
+      <div class="flex justify-between items-center mb-2 pb-1 border-b border-gray-700 text-xs text-gray-400 font-bold uppercase">
+        <span>Comedy Reactions & Stickers</span>
+        <button onclick="toggleStickerWindow()" class="text-gray-400 hover:text-white">&times;</button>
+      </div>
+      <div id="stickerContainer" class="grid grid-cols-4 gap-2 overflow-y-auto custom-scroll p-1 flex-1"></div>
+    </div>
+  </main>
+
+  <!-- POPUP 1: Incoming Chat Request Modal -->
+  <div id="requestModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-gray-900 border border-teal-500 rounded-2xl w-full max-w-sm p-5 text-center shadow-2xl space-y-4">
+      <img id="incomingAvatar" src="" class="w-16 h-16 rounded-full mx-auto border-2 border-teal-500 object-cover" />
+      <div>
+        <h4 id="incomingName" class="text-base font-bold text-white"></h4>
+        <p class="text-xs text-gray-400 mt-1">wants to connect in a 1-to-1 private chat.</p>
+      </div>
+      <div class="flex space-x-3 pt-2">
+        <button onclick="acceptIncoming()" class="flex-1 bg-teal-600 hover:bg-teal-500 text-white font-bold py-2 rounded-lg text-xs transition">
+          Accept
+        </button>
+        <button onclick="declineIncoming()" class="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold py-2 rounded-lg text-xs transition">
+          Decline
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- POPUP 2: Profile & Settings Modal -->
+  <div id="settingsModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 shadow-xl space-y-4">
+      <div class="flex justify-between items-center border-b border-gray-800 pb-2">
+        <h3 class="text-sm font-bold text-white uppercase">Profile & DP Settings</h3>
+        <button onclick="closeSettingsModal()" class="text-gray-400 hover:text-white">&times;</button>
+      </div>
+
+      <div class="flex flex-col items-center space-y-2">
+        <img id="settingsAvatarPreview" src="" class="w-20 h-20 rounded-full border-2 border-teal-500 object-cover" />
+        <label class="cursor-pointer bg-gray-800 hover:bg-gray-700 text-xs text-teal-400 px-3 py-1.5 rounded-md border border-gray-700 transition">
+          Upload Custom DP
+          <input type="file" accept="image/*" class="hidden" onchange="uploadCustomAvatar(event)" />
+        </label>
+      </div>
+
+      <div class="space-y-1">
+        <label class="text-xs font-semibold text-gray-400">Display Name</label>
+        <input type="text" id="settingsNameInput" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-teal-500" />
+      </div>
+
+      <button onclick="saveProfile()" class="w-full bg-teal-600 hover:bg-teal-500 text-white font-semibold py-2 rounded-lg text-sm transition">
+        Update Everywhere
+      </button>
+    </div>
+  </div>
+
+  <!-- APPLICATION JAVASCRIPT -->
+  <script>
+    const socket = io();
+
+    let myProfile = {
+      name: 'Stranger_' + Math.floor(1000 + Math.random() * 9000),
+      avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=' + Math.random()
+    };
+
+    let currentChat = { roomId: null, partner: null };
+    let currentRequesterId = null;
+    let typingDebounce = null;
+
+    // 50+ Meme GIFs and Reaction Stickers
+    const reactionMemes = [
+      "https://media.giphy.com/media/10JhviFuU2gWD6/giphy.gif",
+      "https://media.giphy.com/media/3oEjHAUOqG3lSS0f1C/giphy.gif",
+      "https://media.giphy.com/media/26n6Gx9moCpHU1QXV1/giphy.gif",
+      "https://media.giphy.com/media/3o7TKMt1VVNkHV2PaE/giphy.gif",
+      "https://media.giphy.com/media/l3q2K5jinAlChoCLS/giphy.gif",
+      "https://media.giphy.com/media/5GoVLqeAOo6PK/giphy.gif",
+      "https://media.giphy.com/media/26AHONQ79FdWZhAI0/giphy.gif",
+      "https://media.giphy.com/media/d2lcHJTG5Tscg/giphy.gif",
+      "https://media.giphy.com/media/jUwpNzg9IcyrK/giphy.gif",
+      "https://media.giphy.com/media/ICOgUNjpvO0PC/giphy.gif"
+    ];
+    for (let i = 1; i <= 42; i++) {
+      reactionMemes.push(`https://api.dicebear.com/7.x/fun-emoji/svg?seed=reaction_${i}`);
+    }
+
+    // Connect & Init
+    socket.on('connect', () => {
+      document.getElementById('myName').innerText = myProfile.name;
+      document.getElementById('myAvatar').src = myProfile.avatar;
+      socket.emit('register_user', myProfile);
+      generateStickers();
+    });
+
+    // 1. Worldwide Strangers List
+    socket.on('online_strangers_list', (users) => {
+      const container = document.getElementById('strangersContainer');
+      const strangers = users.filter(u => u.id !== socket.id);
+
+      if (strangers.length === 0) {
+        container.innerHTML = '<div class="p-4 text-center text-xs text-gray-500">No other strangers online right now. Open another window to test!</div>';
+        return;
+      }
+
+      container.innerHTML = '';
+      strangers.forEach(u => {
+        const item = document.createElement('div');
+        item.className = 'p-3 flex items-center space-x-3 hover:bg-gray-800/80 cursor-pointer transition';
+        item.onclick = () => initiateChatRequest(u.id, u.name);
+        item.innerHTML = `
+          <div class="relative">
+            <img src="${u.avatar}" class="w-10 h-10 rounded-full object-cover border border-gray-700" />
+            <span class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-gray-900"></span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h4 class="text-xs font-bold text-gray-200 truncate">${u.name}</h4>
+            <p class="text-[10px] ${u.inChat ? 'text-amber-500' : 'text-teal-400'}">${u.inChat ? '● Busy in chat' : '● Available (Click to request)'}</p>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    });
+
+    // 2. Send Request
+    function initiateChatRequest(targetId, targetName) {
+      if (currentChat.roomId) {
+        alert('Please end your current chat first!');
+        return;
+      }
+      socket.emit('send_chat_request', { targetId });
+      alert(`Chat request sent to ${targetName}. Waiting for acceptance...`);
+    }
+
+    socket.on('request_failed', ({ reason }) => {
+      alert(reason);
+    });
+
+    // 3. Receive Incoming Request Modal
+    socket.on('chat_request_received', (data) => {
+      currentRequesterId = data.requesterId;
+      document.getElementById('incomingName').innerText = data.requesterName;
+      document.getElementById('incomingAvatar').src = data.requesterAvatar;
+      document.getElementById('requestModal').classList.remove('hidden');
+    });
+
+    function acceptIncoming() {
+      document.getElementById('requestModal').classList.add('hidden');
+      if (currentRequesterId) {
+        socket.emit('accept_request', { requesterId: currentRequesterId });
+        currentRequesterId = null;
+      }
+    }
+
+    function declineIncoming() {
+      document.getElementById('requestModal').classList.add('hidden');
+      if (currentRequesterId) {
+        socket.emit('decline_request', { requesterId: currentRequesterId });
+        currentRequesterId = null;
+      }
+    }
+
+    socket.on('chat_request_rejected', () => {
+      alert('The stranger declined your request.');
+    });
+
+    // 4. Chat Started (Strict 2-Person Room Activated)
+    socket.on('chat_started', ({ roomId, partner }) => {
+      currentChat.roomId = roomId;
+      currentChat.partner = partner;
+
+      document.getElementById('placeholderScreen')?.remove();
+      document.getElementById('messageInputBar').classList.remove('hidden');
+      document.getElementById('endChatBtn').classList.remove('hidden');
+
+      document.getElementById('partnerName').innerText = partner.name;
+      document.getElementById('partnerAvatar').src = partner.avatar;
+      document.getElementById('partnerStatus').innerHTML = '<span class="text-teal-400">● Online (Private 1-on-1)</span>';
+
+      const chatBox = document.getElementById('chatMessages');
+      chatBox.innerHTML = `<div class="text-center text-[10px] text-gray-500 my-2">— Private connection established with ${partner.name} —</div>`;
+    });
+
+    // 5. Private Messaging
+    function sendText() {
+      const input = document.getElementById('chatTextInput');
+      const text = input.value.trim();
+      if (!text || !currentChat.roomId) return;
+
+      socket.emit('send_private_message', {
+        roomId: currentChat.roomId,
+        type: 'text',
+        content: text
+      });
+
+      appendMessage(text, 'sent', 'text');
+      input.value = '';
+    }
+
+    function sendMeme(url) {
+      if (!currentChat.roomId) return;
+      socket.emit('send_private_message', {
+        roomId: currentChat.roomId,
+        type: 'sticker',
+        content: url
+      });
+      appendMessage(url, 'sent', 'sticker');
+      toggleStickerWindow();
+    }
+
+    socket.on('receive_private_message', (msg) => {
+      appendMessage(msg.content, 'received', msg.type, msg.timestamp);
+    });
+
+    function appendMessage(content, dir, type, time = null) {
+      const chatBox = document.getElementById('chatMessages');
+      const timeStr = time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const wrap = document.createElement('div');
+      wrap.className = `flex flex-col ${dir === 'sent' ? 'items-end' : 'items-start'} my-2`;
+
+      let inner = type === 'sticker'
+        ? `<img src="${content}" class="w-24 h-24 rounded-lg bg-gray-800 p-1 border border-gray-700 object-contain shadow-md" />`
+        : `<div class="px-3.5 py-2 rounded-xl text-xs max-w-xs ${dir === 'sent' ? 'bg-teal-600 text-white' : 'bg-gray-800 text-gray-200 border border-gray-700'}">${content}</div>`;
+
+      wrap.innerHTML = `${inner}<span class="text-[9px] text-gray-500 mt-1">${timeStr}</span>`;
+      chatBox.appendChild(wrap);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // 6. Typing Status
+    function notifyTyping() {
+      if (!currentChat.roomId) return;
+      socket.emit('typing_status', { roomId: currentChat.roomId, isTyping: true });
+      clearTimeout(typingDebounce);
+      typingDebounce = setTimeout(() => {
+        socket.emit('typing_status', { roomId: currentChat.roomId, isTyping: false });
+      }, 1500);
+    }
+
+    socket.on('peer_typing', ({ isTyping }) => {
+      document.getElementById('typingNotice').classList.toggle('hidden', !isTyping);
+    });
+
+    // 7. Live Profile Change Sync
+    socket.on('peer_profile_updated', (peer) => {
+      if (currentChat.partner && currentChat.partner.id === peer.id) {
+        currentChat.partner.name = peer.name;
+        currentChat.partner.avatar = peer.avatar;
+        document.getElementById('partnerName').innerText = peer.name;
+        document.getElementById('partnerAvatar').src = peer.avatar;
+      }
+    });
+
+    // 8. Offline & Last Seen Tracking
+    socket.on('user_went_offline', ({ id, lastSeen }) => {
+      if (currentChat.partner && currentChat.partner.id === id) {
+        document.getElementById('partnerStatus').innerHTML = `<span class="text-gray-400">Last seen at ${lastSeen}</span>`;
+      }
+    });
+
+    // 9. Leave / End Chat
+    function terminateCurrentChat() {
+      if (currentChat.roomId) {
+        socket.emit('leave_chat', { roomId: currentChat.roomId });
+        location.reload();
+      }
+    }
+
+    socket.on('chat_terminated', ({ message }) => {
+      alert(message);
+      location.reload();
+    });
+
+    // Stickers Grid
+    function generateStickers() {
+      const box = document.getElementById('stickerContainer');
+      box.innerHTML = '';
+      reactionMemes.forEach(url => {
+        const img = document.createElement('img');
+        img.src = url;
+        img.className = 'w-12 h-12 bg-gray-700 rounded-lg p-1 hover:scale-110 cursor-pointer object-contain transition';
+        img.onclick = () => sendMeme(url);
+        box.appendChild(img);
+      });
+    }
+
+    function toggleStickerWindow() {
+      document.getElementById('stickerBox').classList.toggle('hidden');
+    }
+
+    // Settings Profile Management
+    function openSettingsModal() {
+      document.getElementById('settingsNameInput').value = myProfile.name;
+      document.getElementById('settingsAvatarPreview').src = myProfile.avatar;
+      document.getElementById('settingsModal').classList.remove('hidden');
+    }
+
+    function closeSettingsModal() {
+      document.getElementById('settingsModal').classList.add('hidden');
+    }
+
+    function uploadCustomAvatar(e) {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          document.getElementById('settingsAvatarPreview').src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function saveProfile() {
+      const name = document.getElementById('settingsNameInput').value.trim();
+      const avatar = document.getElementById('settingsAvatarPreview').src;
+
+      if (name) myProfile.name = name;
+      if (avatar) myProfile.avatar = avatar;
+
+      document.getElementById('myName').innerText = myProfile.name;
+      document.getElementById('myAvatar').src = myProfile.avatar;
+
+      socket.emit('update_profile', myProfile);
+      closeSettingsModal();
+    }
+  </script>
+</body>
+</html>
+
