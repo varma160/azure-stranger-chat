@@ -1,0 +1,90 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  dockerHubUser: 'mohansaivarma160'
+  imageName: 'stranger-live-chat'
+  azureSubscriptionServiceConnection: 'azure-service-connection'
+  appServiceName: 'stranger-live-chat-b3g6aae9e8f5fbg7'
+
+stages:
+  # ----------------------------------------------------
+  # STAGE 1: CI - Build & Trivy Security Scan
+  # ----------------------------------------------------
+  - stage: BuildAndSecurityScan
+    displayName: 'CI - Build & Trivy Security Scan'
+    jobs:
+      - job: BuildJob
+        displayName: 'Build Docker Image & Run Security Gate'
+        steps:
+          - task: Docker@2
+            displayName: 'Build Local Docker Image'
+            inputs:
+              command: 'build'
+              Dockerfile: '**/Dockerfile'
+              repository: '$(dockerHubUser)/$(imageName)'
+              tags: |
+                $(Build.BuildId)
+                latest
+
+          # Security Scanning using Trivy
+          - script: |
+              echo "Installing Trivy security scanner..."
+              sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+              wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+              echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+              sudo apt-get update && sudo apt-get install -y trivy
+              
+              echo "Scanning Docker Image for Vulnerabilities..."
+              trivy image --severity HIGH,CRITICAL --exit-code 0 $(dockerHubUser)/$(imageName):$(Build.BuildId)
+            displayName: 'Run Trivy Container Vulnerability Scan'
+
+  # ----------------------------------------------------
+  # STAGE 2: Push Image to Registry (Zero-Cost Registry)
+  # ----------------------------------------------------
+  - stage: PushToRegistry
+    displayName: 'Push Image to Docker Hub'
+    dependsOn: BuildAndSecurityScan
+    condition: succeeded()
+    jobs:
+      - job: PushJob
+        displayName: 'Push Container to Docker Hub'
+        steps:
+          - task: Docker@2
+            displayName: 'Login to Docker Hub'
+            inputs:
+              command: 'login'
+              containerRegistry: 'dockerhub-connection'
+
+          - task: Docker@2
+            displayName: 'Push Image to Docker Hub'
+            inputs:
+              command: 'push'
+              repository: '$(dockerHubUser)/$(imageName)'
+              tags: |
+                $(Build.BuildId)
+                latest
+
+  # ----------------------------------------------------
+  # STAGE 3: CD - Deploy to Azure App Service (F1 Free)
+  # ----------------------------------------------------
+  - stage: DeployToAzure
+    displayName: 'CD - Deploy to Azure App Service'
+    dependsOn: PushToRegistry
+    condition: succeeded()
+    jobs:
+      - job: DeployJob
+        displayName: 'Deploy Container to App Service (F1 Free)'
+        steps:
+          - task: AzureWebAppContainer@1
+            displayName: 'Azure App Service Container Deploy'
+            inputs:
+              azureSubscription: '$(azureSubscriptionServiceConnection)'
+              appName: '$(appServiceName)'
+              imageName: '$(dockerHubUser)/$(imageName):$(Build.BuildId)'
+
